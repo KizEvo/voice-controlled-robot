@@ -59,11 +59,16 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define INT_STATE_Pin GPIO_PIN_13
 #define INT_STATE_GPIO_Port GPIOC
+#define RECORD_STATE_Pin GPIO_PIN_14
+#define RECORD_STATE_GPIO_Port GPIOC
+#define LED_MIC_STATE_Pin GPIO_PIN_15
+#define LED_MIC_STATE_GPIO_Port GPIOC
 #define BUTTON_Pin GPIO_PIN_0
 #define BUTTON_GPIO_Port GPIOA
 #define BUTTON_EXTI_IRQn EXTI0_IRQn
-#define LED_MIC_STATE_Pin GPIO_PIN_1
-#define LED_MIC_STATE_GPIO_Port GPIOA
+#define RECORD_BUTTON_Pin GPIO_PIN_2
+#define RECORD_BUTTON_GPIO_Port GPIOA
+#define RECORD_BUTTON_EXTI_IRQn EXTI2_IRQn
 #define I2S2_CLOCK_Pin GPIO_PIN_10
 #define I2S2_CLOCK_GPIO_Port GPIOB
 
