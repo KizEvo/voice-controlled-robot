@@ -24,7 +24,6 @@
 #define ARM_MATH_CM4
 #include "arm_math.h"
 #include "stdlib.h"
-#include "math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,11 +42,19 @@ struct INT_FLAGS flags;
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define MOVE_STOP 53
+#define MOVE_FORWARD 51
+#define MOVE_BACKWARD 115
+#define MOVE_RIGHT 180
+#define MOVE_LEFT 244
+#define VOICE_MOVE_FORWARD 59
+#define VOICE_MOVE_BACKWARD 60
+#define VOICE_MOVE_TURN 61
 #define TRANSMIT_TOTAL_RECORDS_COUNT 54
 #define RESET_RECORDS_COUNT 55
 #define START_RECORD 56
-#define START_VOICE_RECOGNITION 57
-
+#define START_VOICE_FFT 57
+#define START_VOICE_FFT_DCT 58
 #define BUFFER_SIZE 1024 // 128
 #define FFT_LENGTH 512 // 64
 #define DEBOUNCE_TIME_MS 20
@@ -58,6 +65,50 @@ const uint8_t EEPROM_NEXT_RECORD_ADDRESS = 20;
 const uint16_t EEPROM_RECORDS_COUNT_ADDRESS = 32767;
 const uint16_t EEPROM_DEFAULT_RECORDS_AUDIO_ADDRESS = 0;
 const uint16_t EEPROM_ADDRESS = 0xA0;
+
+
+const float DCT_A_1  = 5.66712379;
+const float DCT_A_2  = 1.71957088;
+const float DCT_A_3  = 0.923897982;
+const float DCT_A_4  = -0.284491777;
+const float DCT_A_5  = 1.67162347;
+const float DCT_A_6  = 1.1735419;
+const float DCT_A_7  = -3.90389204;
+const float DCT_A_8  = -3.8169148;
+const float DCT_A_9  = -1.91115558;
+const float DCT_A_10 = -2.23016357;
+const float DCT_A_11 = -2.21148348;
+const float DCT_A_12 = -0.434009075;
+
+
+
+const float DCT_O_1  = 5.71994734;
+const float DCT_O_2  = -2.77491927;
+const float DCT_O_3  = 1.29311395;
+const float DCT_O_4  = 3.47904277;
+const float DCT_O_5  = 2.06083465;
+const float DCT_O_6  = 0.068764925;
+const float DCT_O_7  = -3.57752585;
+const float DCT_O_8  = -0.775300026;
+const float DCT_O_9  = 0.0306355953;
+const float DCT_O_10 = -1.05181408;
+const float DCT_O_11 = -2.92223406;
+const float DCT_O_12 = -0.598013163;
+
+
+const float DCT_U_1  = 7.88730955;
+const float DCT_U_2  = -0.0517123938;
+const float DCT_U_3  = -0.0444734097;
+const float DCT_U_4  = -2.38391399;
+const float DCT_U_5  = -4.31766558;
+const float DCT_U_6  = -5.56417513;
+const float DCT_U_7  = -4.05968857;
+const float DCT_U_8  = -0.52616334;
+const float DCT_U_9  = 0.649846077 ;
+const float DCT_U_10 = -1.08310235 ;
+const float DCT_U_11 = -2.79250503;
+const float DCT_U_12 = -2.29874849;
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -71,14 +122,25 @@ I2C_HandleTypeDef hi2c1;
 I2S_HandleTypeDef hi2s2;
 DMA_HandleTypeDef hdma_spi2_rx;
 
+TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim5;
 
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 
-// RFFT fast instance
-arm_rfft_fast_instance_f32 fft_handler;
+// DCT initialization
+const int nfilter = 40;
+float FREQ_MEL[100];
+float fbank[40] = {};
+float Hm[40] = {};
+float DCT[40] = {};
+float Energy1, Energy2, Energy3;
+float Nguong1, Nguong2, Nguong3;
+
+int	 Nhan_duoc_chu_A;
+int  Nhan_duoc_chu_O;
+int	 Nhan_duoc_chu_U;
 
 // Initialize array of 4 uint16 bit buffer
 uint16_t receiveBuffer[BUFFER_SIZE];
@@ -92,13 +154,16 @@ uint16_t fftBufferIndex;
 //float32_t fftBufferOut[BUFFER_SIZE / 2];
 
 // Initialize FREQS (Hz) array
-int freqs[FFT_LENGTH / 4];
+float freqs[FFT_LENGTH / 4];
 uint8_t storedFreqs[MAX_RECORD_COUNT][FFT_LENGTH / 4];
-uint8_t highestFreqs[MAX_RECORD_COUNT][MAX_FREQ_AND_GAIN];
 uint8_t averageHighestFreqs[MAX_FREQ_AND_GAIN];
 
 // UART Tx data
+uint8_t txData[1];
+
+// UART Rx Data
 uint8_t rxData[1];
+uint8_t rxDataTemp[1];
 
 // Debounce button time
 uint32_t currentTimeInMillis = 0;
@@ -126,6 +191,8 @@ int stateI2S;
 uint8_t stateRecordAudio;
 
 // ** TESTING **
+uint8_t isA = 0;
+uint8_t isO = 0;
 uint8_t resultAvg = 2;
 uint8_t readAfter;
 uint8_t readBefore;
@@ -142,16 +209,22 @@ static void MX_I2S2_Init(void);
 static void MX_TIM5_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void toggleAudioStream();
 void fftTransform();
 void processData();
 void enableRecordAudio();
 void setLedSuccess();
-uint8_t store10HighestFreqsdB();
 void startVoiceRecognition();
 void startRecordSequence();
 void processDataUART();
+void dctTransform();
+void calcDctEnergy();
+void voiceMoveCommand(uint8_t command);
+void MEL_BANK_FILTER(float freq_max, int nfilt);
+void setCarDirections(uint8_t dirState1, uint8_t dirState2, uint8_t dirState3, uint8_t dirState4, uint8_t speed);
+uint8_t store10HighestFreqsdB();
 uint8_t writeEEPROM(uint8_t *dataArray, uint16_t addressToWrite, uint16_t size);
 uint8_t readEEPROM(uint8_t *dataArray, uint16_t addressToRead, uint16_t size);
 uint8_t getValidKeys();
@@ -161,6 +234,20 @@ float complexABS(float real, float compl);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+
+void MEL_BANK_FILTER(float freq_max, int nfilt)
+{
+	float   m_min = 0.0;
+	float	m_max = 2595.0 * log10f(1.0 + freq_max / 700.0);
+	float   delta = (m_max - m_min) / (nfilt + 1);
+
+	for (int i = 0; i <= ( nfilt +  1); i++)
+	{
+		float mel_temp= delta * i;
+		FREQ_MEL[i] =700.0 * (pow(10.0,mel_temp / 2595.0) - 1.0);
+	}
+}
 
 struct complex w(float kn, float N)
 {
@@ -244,6 +331,7 @@ int main(void)
   MX_TIM5_Init();
   MX_USART1_UART_Init();
   MX_I2C1_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
   flags.recordTimer = 1;
@@ -251,6 +339,8 @@ int main(void)
   flags.audioButton = 0;
 
   HAL_UART_Receive_IT(&huart1, (uint8_t *) rxData, 1);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 
   /* USER CODE END 2 */
 
@@ -263,9 +353,9 @@ int main(void)
 
 	  if(flags.dataReceivedUART == 1) processDataUART();
 	  if(flags.audioButton == 1) toggleAudioStream();
-	  if(flags.recordButton == 1) startRecordSequence();
+	  if(flags.recordButton == 1 && rxDataTemp[0] == START_VOICE_FFT) startRecordSequence();
 	  if(flags.dataReceived == 1) processData();
-	  if(flags.voiceControl == 1) startVoiceRecognition();
+	  if(flags.voiceControl == 1 && rxDataTemp[0] == START_VOICE_FFT) startVoiceRecognition();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -388,6 +478,69 @@ static void MX_I2S2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 310;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 255;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
   * @brief TIM5 Initialization Function
   * @param None
   * @retval None
@@ -502,38 +655,21 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOC, INT_STATE_Pin|RECORD_STATE_Pin|LED_MIC_STATE_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, A_STATE_Pin|B_STATE_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, CAR_DIR_1_Pin|CAR_DIR_2_Pin|CAR_DIR_3_Pin|CAR_DIR_4_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, RESET_RECORD_STATE_Pin|WRITE_RECORD_STATE_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : INT_STATE_Pin */
-  GPIO_InitStruct.Pin = INT_STATE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(INT_STATE_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : RECORD_STATE_Pin LED_MIC_STATE_Pin */
-  GPIO_InitStruct.Pin = RECORD_STATE_Pin|LED_MIC_STATE_Pin;
+  /*Configure GPIO pins : INT_STATE_Pin RECORD_STATE_Pin LED_MIC_STATE_Pin */
+  GPIO_InitStruct.Pin = INT_STATE_Pin|RECORD_STATE_Pin|LED_MIC_STATE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : A_STATE_Pin B_STATE_Pin */
-  GPIO_InitStruct.Pin = A_STATE_Pin|B_STATE_Pin;
+  /*Configure GPIO pins : CAR_DIR_1_Pin CAR_DIR_2_Pin CAR_DIR_3_Pin CAR_DIR_4_Pin */
+  GPIO_InitStruct.Pin = CAR_DIR_1_Pin|CAR_DIR_2_Pin|CAR_DIR_3_Pin|CAR_DIR_4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : RESET_RECORD_STATE_Pin WRITE_RECORD_STATE_Pin */
-  GPIO_InitStruct.Pin = RESET_RECORD_STATE_Pin|WRITE_RECORD_STATE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
@@ -581,11 +717,13 @@ void toggleAudioStream()
 		HAL_GPIO_WritePin(LED_MIC_STATE_GPIO_Port, LED_MIC_STATE_Pin, GPIO_PIN_RESET);
 		// Clear callback flag
 		flags.dataReceived = 0;
-	} else {
-//		Enable I2S Receive DMA
-//		HAL_I2S_Receive_DMA(&hi2s2, (uint16_t *) receiveBuffer, BUFFER_SIZE);
-		HAL_GPIO_WritePin(INT_STATE_GPIO_Port, INT_STATE_Pin, GPIO_PIN_RESET);
+	} else if(rxDataTemp[0] == START_VOICE_FFT_DCT) {
+		// Enable I2S Receive DMA
+		HAL_I2S_Receive_DMA(&hi2s2, (uint16_t *) receiveBuffer, BUFFER_SIZE);
 
+		// Set LED state
+		HAL_GPIO_WritePin(LED_MIC_STATE_GPIO_Port, LED_MIC_STATE_Pin, GPIO_PIN_SET);
+	} else if(rxDataTemp[0] == START_VOICE_FFT){
 		recordsCount = 0;
 		flags.recordButton = 1;
 
@@ -594,8 +732,6 @@ void toggleAudioStream()
 
 		flags.recordButton = 0;
 		flags.voiceControl = 1;
-		// Set LED state
-		HAL_GPIO_WritePin(LED_MIC_STATE_GPIO_Port, LED_MIC_STATE_Pin, GPIO_PIN_SET);
 	}
 	// Clear audioButton flag
 	flags.audioButton = 0;
@@ -613,7 +749,18 @@ void processData()
 	}
 	// FFT processing
 	fftTransform();
-	// Clear dataReceived flag
+
+	// Mel bank filter, param : max_freq and filter quantities
+	if(rxDataTemp[0] == START_VOICE_FFT_DCT){
+		MEL_BANK_FILTER(4000, nfilter);
+
+		// DCT processing
+		dctTransform();
+
+		// Calc DCT energy
+		calcDctEnergy();
+	}
+
 	flags.dataReceived = 0;
 }
 
@@ -631,12 +778,90 @@ void fftTransform()
 	// INDEX = FREQ * (FFT_LENGTH / 4) / (F_SAMPLE / 2)
 	// EX: 12 = 3000 * (64 / 2) / (16000 / 2);
 
-	for(uint16_t i = 0; i < FFT_LENGTH / 4; i++){
-//		freqs[i] = (int)(20.0 * log10f(sqrtf(b[i].re * b[i].re + b[i].im * b[i].im)));
-		freqs[i] = (int)(b[i].re * b[i].re + b[i].im * b[i].im);
-		freqs[i] = floor(freqs[i] / FFT_LENGTH);
-		if(flags.recordButton == 1 && flags.recordTimer == 1) storedFreqs[recordsCount][i] = (uint8_t) freqs[i];
+	if(rxDataTemp[0] == START_VOICE_FFT_DCT){
+		for(uint16_t i = 0; i < FFT_LENGTH / 4; i++){
+			freqs[i] = b[i].re * b[i].re + b[i].im * b[i].im;
+		}
+	} else {
+		for(uint16_t i = 0; i < FFT_LENGTH / 4; i++){
+//			freqs[i] = (int)(20.0 * log10f(sqrtf(b[i].re * b[i].re + b[i].im * b[i].im)));
+			freqs[i] = b[i].re * b[i].re + b[i].im * b[i].im;
+			freqs[i] = floor(freqs[i] / FFT_LENGTH);
+			if(flags.recordButton == 1 && flags.recordTimer == 1) storedFreqs[recordsCount][i] = (uint8_t) freqs[i];
+		}
 	}
+}
+
+void dctTransform(){
+
+	for(int m = 1; m <=  nfilter ;m++)
+	{
+		float f_m_tru = FREQ_MEL[m - 1];
+		float f_m = FREQ_MEL[m];
+		float f_m_cong = FREQ_MEL[m + 1];
+		int Start_num = f_m_tru / 31.25;
+		while( (Start_num * 31.25) <= f_m_cong)
+		{
+
+			     if((Start_num * 31.25) <= f_m_tru)
+			{
+				fbank[m-1]= 0.0;
+			}
+			else if((Start_num * 31.25) <= f_m)
+			{
+				fbank[m-1]+= (((Start_num * 31.25) - f_m_tru) / (f_m - f_m_tru)) * freqs[Start_num];
+			}
+			else if((Start_num * 31.25) <= f_m_cong)
+			{
+				fbank[m-1]+= ((f_m_cong - (Start_num * 31.25)) / (f_m_cong - f_m)) * freqs[Start_num];
+			}
+			Start_num++;
+		}
+	}
+
+	for (int i = 0 ; i < nfilter; i++)
+	{
+		Hm[i] =  log10f(fbank[i]);
+	}
+
+	for (int k = 0 ; k < nfilter; k++)
+	{
+		DCT[k] = 0;
+		for (int n = 0; n < nfilter; n++)
+		{
+			DCT[k] += Hm[n] * cosf(pi/nfilter * (n + 0.5) * k);
+		}
+	}
+
+}
+
+void calcDctEnergy(){
+	   Energy1 = sqrt( (( DCT[1] - (DCT_A_1)) * ( DCT[1] - (DCT_A_1))) + (( DCT[2] - (DCT_A_2)) * ( DCT[2] - (DCT_A_2))) + (( DCT[3] - (DCT_A_3)) * ( DCT[3] - (DCT_A_3))) + (( DCT[4] - (DCT_A_4)) * ( DCT[4] - (DCT_A_4)))  +  (( DCT[5] - (DCT_A_5)) * ( DCT[5] - (DCT_A_5))) + (( DCT[6] - (DCT_A_6)) * ( DCT[6] - (DCT_A_6))) +  (( DCT[7] - (DCT_A_7)) * ( DCT[7] - (DCT_A_7)))  +   (( DCT[8] - (DCT_A_8)) * ( DCT[8] - (DCT_A_8))) +  (( DCT[9] - (DCT_A_9)) * ( DCT[9] - (DCT_A_9)))  +   (( DCT[10] - (DCT_A_10)) * ( DCT[10] - (DCT_A_10)))   +    (( DCT[11] - (DCT_A_11)) * ( DCT[11] - (DCT_A_11))) + (( DCT[12] - (DCT_A_12)) * ( DCT[12] - (DCT_A_12))) );
+	   Nguong1 = 1 - Energy1 / 12.0;
+	   if(Nguong1 > 0.45)
+	   {
+		   txData[0] = 65;
+		   HAL_UART_Transmit(&huart1, txData , 1, 1000);
+		   flags.audioButton = 1;
+	   }
+
+	   Energy2 = sqrt( (( DCT[1] - (DCT_O_1)) * ( DCT[1] - (DCT_O_1))) + (( DCT[2] - (DCT_O_2)) * ( DCT[2] - (DCT_O_2))) + (( DCT[3] - (DCT_O_3)) * ( DCT[3] - (DCT_O_3))) + (( DCT[4] - (DCT_O_4)) * ( DCT[4] - (DCT_O_4)))  +  (( DCT[5] - (DCT_O_5)) * ( DCT[5] - (DCT_O_5))) + (( DCT[6] - (DCT_O_6)) * ( DCT[6] - (DCT_O_6))) +  (( DCT[7] - (DCT_O_7)) * ( DCT[7] - (DCT_O_7)))  +   (( DCT[8] - (DCT_O_8)) * ( DCT[8] - (DCT_O_8))) +  (( DCT[9] - (DCT_O_9)) * ( DCT[9] - (DCT_O_9)))  +   (( DCT[10] - (DCT_O_10)) * ( DCT[10] - (DCT_O_10)))   +    (( DCT[11] - (DCT_O_11)) * ( DCT[11] - (DCT_O_11))) + (( DCT[12] - (DCT_O_12)) * ( DCT[12] - (DCT_O_12))) );
+	   Nguong2 = 1 - Energy2 / 12.0;
+	   if(Nguong2 > 0.45)
+	   {
+		   txData[0] = 79;
+		   HAL_UART_Transmit(&huart1, txData, 1, 1000);
+		   flags.audioButton = 1;
+	   }
+
+	   Energy3 = sqrt( (( DCT[1] - (DCT_U_1)) * ( DCT[1] - (DCT_U_1))) + (( DCT[2] - (DCT_U_2)) * ( DCT[2] - (DCT_U_2))) + (( DCT[3] - (DCT_U_3)) * ( DCT[3] - (DCT_U_3))) + (( DCT[4] - (DCT_U_4)) * ( DCT[4] - (DCT_U_4)))  +  (( DCT[5] - (DCT_U_5)) * ( DCT[5] - (DCT_U_5))) + (( DCT[6] - (DCT_U_6)) * ( DCT[6] - (DCT_U_6))) +  (( DCT[7] - (DCT_U_7)) * ( DCT[7] - (DCT_U_7)))  +   (( DCT[8] - (DCT_U_8)) * ( DCT[8] - (DCT_U_8))) +  (( DCT[9] - (DCT_U_9)) * ( DCT[9] - (DCT_U_9)))  +   (( DCT[10] - (DCT_U_10)) * ( DCT[10] - (DCT_U_10)))   +    (( DCT[11] - (DCT_U_11)) * ( DCT[11] - (DCT_U_11))) + (( DCT[12] - (DCT_U_12)) * ( DCT[12] - (DCT_U_12))) );
+	   Nguong3 = 1 - Energy3 / 12.0;
+	   if(Nguong3 > 0.5)
+	   {
+		   txData[0] = 85;
+		   HAL_UART_Transmit(&huart1, txData, 1, 1000);
+		   flags.audioButton = 1;
+	   }
 }
 
 void enableRecordAudio()
@@ -722,7 +947,7 @@ uint8_t store10HighestFreqsdB(){
 	readAfter = correctFreqsIndex;
 	readBefore = tempFreqsIndex;
 
-	return 100 * readAfter / readBefore;
+	return 100 * correctFreqsIndex / tempFreqsIndex;
 }
 
 void startRecordSequence(){
@@ -739,11 +964,6 @@ void startRecordSequence(){
 	for(uint16_t i = 0; i < MAX_FREQ_AND_GAIN; i++){
 	  averageHighestFreqs[i] = 0;
 	}
-//	for(uint16_t col = 0; col < MAX_RECORD_COUNT; col++){
-//	  for(uint16_t row = 0; row < MAX_FREQ_AND_GAIN; row++){
-//		  highestFreqs[col][row] = 0;
-//	  }
-//	}
 
 	// Record audio MAX_RECORD_COUNT time
 	while(recordsCount < MAX_RECORD_COUNT){
@@ -798,8 +1018,9 @@ void startVoiceRecognition(){
 	for(uint16_t i = 0; i < MAX_FREQ_AND_GAIN; i++){
 	  averageHighestFreqs[i] = 0;
 	}
-	HAL_GPIO_WritePin(A_STATE_GPIO_Port, A_STATE_Pin, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(B_STATE_GPIO_Port, B_STATE_Pin, GPIO_PIN_RESET);
+
+	isA = 0;
+	isO = 0;
 
 	// store record counts to recordsAudioCount[]
 	status = readEEPROM(recordsAudioCount, EEPROM_RECORDS_COUNT_ADDRESS, sizeof(recordsAudioCount));
@@ -812,8 +1033,6 @@ void startVoiceRecognition(){
 
 
 	while(totalStored > 0){
-//		if(isCorrectAudio == 1) break;
-
 		// decrement recordsAudioCount so that readEEPROM can calc the
 		// correct address
 		totalStored--;
@@ -854,52 +1073,21 @@ void startVoiceRecognition(){
 
 		currentMatchPercent = 100 * keyMatches / totalKey;
 		if(currentMatchPercent > previousMatchPercent
-				&& currentMatchPercent >= 80
+				&& currentMatchPercent >= 60
 				&& indexHighestEEPROMMagni == indexHighestMagni) {
 			previousMatchPercent = currentMatchPercent;
-			if(totalStored == 0) HAL_GPIO_WritePin(A_STATE_GPIO_Port, A_STATE_Pin, GPIO_PIN_SET);
-			else if(totalStored == 1) HAL_GPIO_WritePin(B_STATE_GPIO_Port, B_STATE_Pin, GPIO_PIN_SET);
+			if(totalStored == 0) isA = 1;
+			else if(totalStored == 1) isO = 1;
 		}
 
 		prevHighestEEPROMMagni = 0;
 		prevHighestMagni = 0;
-
-//		uint8_t totalKey = getValidKeys();
-//		if(totalKey <= 0) return;
-
-//		for(uint8_t i = 0; i < totalKey * 2; i += 2){
-//		  for(uint16_t freqIndex = 0; freqIndex < FFT_LENGTH / 4; freqIndex++){
-//			  if(storedFreqs[0][freqIndex] > temp_dB) {
-//				  temp_dB = storedFreqs[0][freqIndex];
-//				  tempIndex = freqIndex;
-//			  }
-//		  }
-//
-//		  if(averageHighestFreqs[i] == tempIndex){
-//			  uint8_t diff = temp_dB > averageHighestFreqs[i + 1] ?
-//					  (temp_dB - averageHighestFreqs[i + 1]) : (averageHighestFreqs[i + 1] - temp_dB);
-//			  if(diff > 5) break;
-//
-//			  correctMatches++;
-//		  }
-//
-//		  // if totalKey > 2 then the only need to match totalKey - correctMatches <= 1
-//		  // else to found match audio correctMatches have to equal totalKey
-//		  if(totalKey - correctMatches <= 1 && totalKey > 2) {
-//			  isCorrectAudio = 1;
-//			  break;
-//		  } else if (totalKey - correctMatches <= 0 && totalKey <= 2){
-//			  isCorrectAudio = 1;
-//			  break;
-//		  }
-//
-//		  storedFreqs[0][tempIndex] = 0;
-//		  temp_dB = 0;
-//		  tempIndex = 0;
-//		}
 	}
 
 	if(previousMatchPercent >= 80) setLedSuccess();
+	HAL_GPIO_WritePin(RECORD_STATE_GPIO_Port, RECORD_STATE_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(LED_MIC_STATE_GPIO_Port, LED_MIC_STATE_Pin, GPIO_PIN_RESET);
+
 }
 
 uint8_t getValidKeys(){
@@ -922,15 +1110,62 @@ void processDataUART(){
 		recordsAudioCount[0] = 0;
 		writeEEPROM(recordsAudioCount, EEPROM_RECORDS_COUNT_ADDRESS, sizeof(recordsAudioCount));
 	} else if(rxDataUART == START_RECORD) {
+		rxDataTemp[0] = START_VOICE_FFT;
 		flags.recordButton = 1;
-	} else if(rxDataUART == START_VOICE_RECOGNITION){
+	} else if(rxDataUART == START_VOICE_FFT){
+		rxDataTemp[0] = START_VOICE_FFT;
 		flags.audioButton = 1;
 	} else if(rxDataUART == TRANSMIT_TOTAL_RECORDS_COUNT){
 		readEEPROM(recordsAudioCount, EEPROM_RECORDS_COUNT_ADDRESS, sizeof(recordsAudioCount));
 		HAL_Delay(100);
 		HAL_UART_Transmit(&huart1, recordsAudioCount, 1, 1000);
+	} else if(rxDataUART == START_VOICE_FFT_DCT){
+		flags.audioButton = 1;
+		rxDataTemp[0] = START_VOICE_FFT_DCT;
+	} else if(rxDataUART == VOICE_MOVE_FORWARD){
+		voiceMoveCommand(MOVE_FORWARD);
+	} else if(rxDataUART == VOICE_MOVE_BACKWARD){
+		voiceMoveCommand(MOVE_BACKWARD);
+	} else if(rxDataUART == VOICE_MOVE_TURN){
+		voiceMoveCommand(MOVE_RIGHT);
+	} else if(rxDataUART == MOVE_STOP){
+		setCarDirections(GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_RESET, 0);
+	} else if(rxDataUART <= MOVE_FORWARD){
+		setCarDirections(GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_RESET, rxDataUART * 5);
+	} else if(rxDataUART <= MOVE_BACKWARD){
+		setCarDirections(GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_SET, (rxDataUART - 64) * 5);
+	} else if(rxDataUART <= MOVE_RIGHT){
+		setCarDirections(GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_SET, 110);
+	} else if(rxDataUART <= MOVE_LEFT){
+		setCarDirections(GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_SET, GPIO_PIN_RESET, 110);
 	}
+	// Enable UART receive interrupt again
 	HAL_UART_Receive_IT(&huart1, (uint8_t *) rxData, 1);
+}
+
+void voiceMoveCommand(uint8_t command){
+	if(command == VOICE_MOVE_FORWARD){
+		setCarDirections(GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_RESET, 110);
+	} else if(command == VOICE_MOVE_BACKWARD){
+		setCarDirections(GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_SET, 110);
+	} else {
+		setCarDirections(GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_SET, 110);
+	}
+
+	HAL_Delay(1500);
+
+	// turn off car after 1500ms
+	setCarDirections(GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_RESET, 0);
+}
+
+void setCarDirections(uint8_t dirState1, uint8_t dirState2, uint8_t dirState3, uint8_t dirState4, uint8_t speed){
+	HAL_GPIO_WritePin(CAR_DIR_1_GPIO_Port, CAR_DIR_1_Pin, dirState1);
+	HAL_GPIO_WritePin(CAR_DIR_2_GPIO_Port, CAR_DIR_2_Pin, dirState2);
+	HAL_GPIO_WritePin(CAR_DIR_3_GPIO_Port, CAR_DIR_3_Pin, dirState3);
+	HAL_GPIO_WritePin(CAR_DIR_4_GPIO_Port, CAR_DIR_4_Pin, dirState4);
+
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, speed);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, speed);
 }
 
 uint8_t writeEEPROM(uint8_t *dataArray, uint16_t addressToWrite, uint16_t size){

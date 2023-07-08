@@ -49,6 +49,8 @@ extern "C" {
 
 /* USER CODE END EM */
 
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
@@ -63,16 +65,16 @@ void Error_Handler(void);
 #define RECORD_STATE_GPIO_Port GPIOC
 #define LED_MIC_STATE_Pin GPIO_PIN_15
 #define LED_MIC_STATE_GPIO_Port GPIOC
-#define A_STATE_Pin GPIO_PIN_0
-#define A_STATE_GPIO_Port GPIOA
-#define B_STATE_Pin GPIO_PIN_2
-#define B_STATE_GPIO_Port GPIOA
+#define CAR_DIR_1_Pin GPIO_PIN_3
+#define CAR_DIR_1_GPIO_Port GPIOA
+#define CAR_DIR_2_Pin GPIO_PIN_4
+#define CAR_DIR_2_GPIO_Port GPIOA
+#define CAR_DIR_3_Pin GPIO_PIN_5
+#define CAR_DIR_3_GPIO_Port GPIOA
+#define CAR_DIR_4_Pin GPIO_PIN_6
+#define CAR_DIR_4_GPIO_Port GPIOA
 #define I2S2_CLOCK_Pin GPIO_PIN_10
 #define I2S2_CLOCK_GPIO_Port GPIOB
-#define RESET_RECORD_STATE_Pin GPIO_PIN_8
-#define RESET_RECORD_STATE_GPIO_Port GPIOB
-#define WRITE_RECORD_STATE_Pin GPIO_PIN_9
-#define WRITE_RECORD_STATE_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
