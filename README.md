@@ -1,7 +1,9 @@
 <h1>Voice Controlled Robot Project</h1>
-University project, led a team of three to create a voice controlled robot.
-
-<h2>Demo</h2>         
+<ul>
+<li>University project, led a team of three to create a voice controlled robot.</li>
+<li>Implemented Fast Fourier Transform and Mel Frequency Cepstral Coefficients to recognize simple letters</li>
+</ul>
+<h2>Video Demo</h2>         
 
 [![Watch the demo](https://img.youtube.com/vi/xk0MdGKy55M/hqdefault.jpg)](https://www.youtube.com/watch?v=xk0MdGKy55M)
 
