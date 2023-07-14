@@ -2,6 +2,7 @@
 University project, led a team of three to create a voice controlled robot.
 
 <h2>Demo</h2>         
+
 [![Watch the demo](https://img.youtube.com/vi/xk0MdGKy55M/hqdefault.jpg)](https://www.youtube.com/watch?v=xk0MdGKy55M)
 
 <h2>Software</h2>
