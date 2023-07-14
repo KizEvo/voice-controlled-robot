@@ -13,7 +13,9 @@
 <li>React Native</li>
 <li>Android Studio</li>
 <li>JavaScript/TypeScript</li>
-<li>[Android app repository](https://github.com/KizEvo/wireless-robot-control-app)</li>
+<br />
+         
+Click here for [Android app repository](https://github.com/KizEvo/wireless-robot-control-app)
 </ul>
 <h2>Hardware</h2>
 <ul>
