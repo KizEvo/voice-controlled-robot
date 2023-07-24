@@ -21,8 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#define ARM_MATH_CM4
-#include "arm_math.h"
+#include "math.h"
 #include "stdlib.h"
 /* USER CODE END Includes */
 
@@ -80,8 +79,6 @@ const float DCT_A_10 = -2.23016357;
 const float DCT_A_11 = -2.21148348;
 const float DCT_A_12 = -0.434009075;
 
-
-
 const float DCT_O_1  = 5.71994734;
 const float DCT_O_2  = -2.77491927;
 const float DCT_O_3  = 1.29311395;
@@ -94,7 +91,6 @@ const float DCT_O_9  = 0.0306355953;
 const float DCT_O_10 = -1.05181408;
 const float DCT_O_11 = -2.92223406;
 const float DCT_O_12 = -0.598013163;
-
 
 const float DCT_U_1  = 7.88730955;
 const float DCT_U_2  = -0.0517123938;
@@ -147,7 +143,7 @@ uint16_t receiveBuffer[BUFFER_SIZE];
 static volatile uint16_t *rxBufferPtr;
 
 // Initialize FFT IN array
-float32_t fftBufferIn[BUFFER_SIZE / 2];
+float fftBufferIn[BUFFER_SIZE / 2];
 uint16_t fftBufferIndex;
 
 // Initialize FFT OUT array
@@ -1123,11 +1119,11 @@ void processDataUART(){
 		flags.audioButton = 1;
 		rxDataTemp[0] = START_VOICE_FFT_DCT;
 	} else if(rxDataUART == VOICE_MOVE_FORWARD){
-		voiceMoveCommand(MOVE_FORWARD);
+		voiceMoveCommand(VOICE_MOVE_FORWARD);
 	} else if(rxDataUART == VOICE_MOVE_BACKWARD){
-		voiceMoveCommand(MOVE_BACKWARD);
+		voiceMoveCommand(VOICE_MOVE_BACKWARD);
 	} else if(rxDataUART == VOICE_MOVE_TURN){
-		voiceMoveCommand(MOVE_RIGHT);
+		voiceMoveCommand(VOICE_MOVE_TURN);
 	} else if(rxDataUART == MOVE_STOP){
 		setCarDirections(GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_RESET, 0);
 	} else if(rxDataUART <= MOVE_FORWARD){
